@@ -1,0 +1,115 @@
+/**
+ * pyPLP Simulator - Canvas Text & Annotation Configuration
+ * =========================================================
+ * Edit this configuration file to change or adjust any textual label, badge,
+ * message, enzyme name, or scientific annotation displayed on the canvas.
+ *
+ * Supported Dynamic Placeholders:
+ *   {targetType} : Molecule type (e.g. "DNA" or "RNA")
+ *   {gap}        : Ligation gap distance in base pairs (e.g. "1")
+ *   {matchPct}   : Sequence alignment match percentage (e.g. "94")
+ *   {repeatNum}  : Concatemer repeat index (e.g. "1", "2", "3")
+ *   {reason}     : Diagnostic arrest reason string
+ */
+
+const CANVAS_TEXT_CONFIG = {
+  // --- 1. STRANDS & MOLECULAR ANNOTATIONS ---
+  strands: {
+    targetStrandLabel: "Target ({targetType}) 5' → 3'",
+    leftArmLinearLabel: "5'-Left Arm",
+    rightArmLinearLabel: "Right Arm-3'",
+    backboneLinearLabel: "Backbone",
+    leftArmHybridLabel: "Left Arm (5'-PO4)",
+    rightArmHybridLabel: "Right Arm (3'-OH)",
+    backboneLoopLabel: "Backbone Loop",
+    nucleotide5PrimeTag: "5'",
+    nucleotide3PrimeTag: "3'"
+  },
+
+  // --- 2. LIGATION NICK, ENZYMES & CALLOUTS (STAGE 2 & 3) ---
+  ligation: {
+    nickFlushBadge: "0-bp Nick (3'-OH | 5'-PO4)",
+    nickMismatchBadge: "3'-End Mismatch (Arrested)",
+    nickGapBadge: "{gap}-bp Gap (Arrested)",
+    nickNoAlignBadge: "No Alignment",
+    
+    enzymeDnaLigase: "Ligase",
+    enzymeRnaLigase: "SplintR",
+    
+    sealedSuccessBanner: "COVALENT PHOSPHODIESTER BOND SEALED",
+    arrestedMismatchBanner: "LIGATION ARRESTED: 3' MISMATCH DETECTED",
+    arrestedGapBanner: "LIGATION ARRESTED: {gap}-BP GAP DETECTED",
+    arrestedNoAlignBanner: "LIGATION ARRESTED: ARMS DO NOT ALIGN"
+  },
+
+  // --- 3. CIRCULAR TOPOLOGY & RCA PRIMER ANNEALING (STAGE 4) ---
+  rcaPrimer: {
+    circularPlpTitle: "Circular Padlock Probe (Closed Single Strand)",
+    primerAnnealedBanner: "RCA PRIMER ANNEALED (3'-OH EXTENSION READY)",
+    primerStrandLabel: "RCA Primer (5' → 3')",
+    primerBlockedBadge: "✕ NON-COMPLEMENTARY PRIMER",
+    primerArrestedHeader: "PRIMER ANNEALING ARRESTED: NO COMPLEMENTARY BINDING SITE",
+    primerArrestedDetail: "Primer sequence matches 0 cassettes on circular template ({matchPct}% match < 70% required)"
+  },
+
+  // --- 4. PHI29 ROLLING CIRCLE AMPLIFICATION (STAGE 5) ---
+  rollingCircle: {
+    phi29EnzymeName: "phi29",
+    phi29InactiveSymbol: "✕",
+    repeatBadgePrefix: "Repeat {repeatNum}",
+    concatemerStrandLabel: "Single-Stranded Concatemer DNA (Antisense)",
+    rcaBlockedHeader: "RCA INITIATION BLOCKED: {reason}",
+    rcaReasonLigation: "Rolling circle amplification requires a closed circular template. Ligation was arrested.",
+    rcaReasonPrimer: "Phi29 Polymerase requires an annealed primer 3'-OH terminus to initiate."
+  },
+
+  // --- 5. CONCATEMER PROBE HYBRIDIZATION & FLUOROMETER (STAGE 6) ---
+  detection: {
+    fluorophoreActiveBadge: "FAM",
+    fluorophoreQuenchedBadge: "FAM (Off)",
+    probeStrandLabel: "Detection Probe (5' → 3')",
+    probeFailedHeader: "PROBE HYBRIDIZATION FAILED: PROBE NOT COMPLEMENTARY TO CONCATEMER",
+    probeFailedDetail: "Probe sequence has 0 complementary target cassettes ({matchPct}% match < 70%); 0 a.u. signal",
+    fluorometerGraphTitle: "REAL-TIME FLUOROMETER",
+    fluorometerIntensityUnit: "a.u.",
+    fluorometerTimeLabel: "t (s)"
+  },
+
+  // --- 6. STAGE BANNER HEADERS & SCIENTIFIC DESCRIPTIONS ---
+  stages: {
+    1: {
+      title: "Stage 1: Solution State (Target & Padlock Probe)",
+      desc: "Single-stranded target sequence (DNA/RNA) and linear Padlock Probe with 5'-phosphate and 3'-hydroxyl termini float independently in hybridization buffer."
+    },
+    2: {
+      title: "Stage 2: Target Recognition & Hybridization",
+      desc: "Padlock probe arms recognize and anneal to contiguous target sites in an antiparallel orientation, looping the backbone and aligning termini into a nick junction."
+    },
+    3: {
+      title: "Stage 3: Enzymatic Ligation & Topological Interlocking",
+      desc: "DNA Ligase or SplintR inspects the nick. If perfect base-pairing is detected with zero gap, it catalyzes phosphodiester bond synthesis to yield a covalently closed circle."
+    },
+    4: {
+      title: "Stage 4: RCA Primer Annealing",
+      desc: "Sequence-specific RCA primer anneals to the complementary binding cassette on the circular padlock template, supplying the free 3'-OH terminus required for polymerase extension."
+    },
+    5: {
+      title: "Stage 5: Continuous Phi29 Rolling Circle Amplification (RCA)",
+      desc: "Phi29 DNA Polymerase engages the primed template and initiates isothermal rolling synthesis, displacing downstream strands to generate long tandem concatemers."
+    },
+    6: {
+      title: "Stage 6: Concatemer Hybridization & Fluorescence Detection",
+      desc: "Sequence-specific fluorescent detection probes anneal to repeating monomer cassettes along the concatemer, emitting measurable fluorescent signals."
+    }
+  }
+};
+
+// Export for browser window environment
+if (typeof window !== 'undefined') {
+  window.CANVAS_TEXT_CONFIG = CANVAS_TEXT_CONFIG;
+}
+
+// Export for Node/CommonJS environment
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = CANVAS_TEXT_CONFIG;
+}

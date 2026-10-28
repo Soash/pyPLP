@@ -1,0 +1,13 @@
+{
+  "alignment": {
+    "mafft_threads": 8
+  },
+  "arm_design": {
+    "blastMinIdentity": 70.0
+  },
+  "plp_generation": {
+    "enabled": false
+  }
+}
+
+

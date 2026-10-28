@@ -1,0 +1,27 @@
+--- panel_optimizer.py
++++ panel_optimizer.py
+@@ -298,6 +298,8 @@
+             channel_rca = channel_rca_primers[ch_idx]
+ 
+             for arm_idx, target_arm in enumerate(ch["arms"]):
++                failed_mfe = 0
++                failed_dimer = 0
+                 left_arm = str(target_arm["left_arm"]).strip().upper()
+                 right_arm = str(target_arm["right_arm"]).strip().upper()
+                 len_l = len(left_arm)
+@@ -362,6 +365,7 @@
+                             break
+ 
+                     if not plp_res:
++                        print(f"DEBUG: Failed to generate backbone! Failed MFE: {failed_mfe}, Failed Dimer: {failed_dimer}")
+                         all_channels_filled = False
+                         break
+ 
+@@ -383,6 +387,7 @@
+                                 break
+ 
+                     if is_cross_reactive:
++                        failed_dimer += 1
+                         all_channels_filled = False
+                         break
+ 

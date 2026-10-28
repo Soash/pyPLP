@@ -1,0 +1,43 @@
+{
+  "arm_design": {
+    "min_tm": 40.0,
+    "maxHomopolymer": 4,
+    "max_hairpin_tm": 30.0,
+    "threads": 32,
+    "blastMinIdentity": 70.0,
+    "maxAllowedHits": 0
+  },
+  "plp_generation": {
+    "enabled": true,
+    "sample_arms_count": 1,
+    "plp_per_arm": 20,
+    "backbone_length_factor": 3,
+    "min_plp_mfe_dg": -6.0,
+    "max_paired_arm_bases": 3,
+    "max_paired_total_bases": 6,
+    "structures_dir": "plp_structures",
+    "keep_ct_ps": false,
+    "backbone_architecture": {
+      "spacer1_len": 4,
+      "rca_primer_binding_len": 18,
+      "spacer2_len": 4,
+      "probe_binding_len": 18,
+      "spacer3_len": 0, 
+      "rest_len": 4,
+      "restriction_site": "GCTGAGG",
+      "re_mode": "embedded_in_probe",
+      "re_probe_offset": 2,
+      "universal_rca_primer_seq": "",
+      "universal_probe_seq": "",
+      "min_rca_primer_tm": 40.0,
+      "min_probe_tm": 40.0
+    }
+  },
+  "multiplex": {
+    "target_channels": 1,
+    "max_cross_dimer_dg": -2.0,
+    "channel_labels": ["5'-FAM"],
+    "universal_detection_probe": "",
+    "fixed_oligos": ""
+  }
+}

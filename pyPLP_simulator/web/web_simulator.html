@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>pyPLP Simulator: Interactive Molecular Reaction Studio</title>
+  <script src="https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js"></script>
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body class="min-h-screen flex flex-col">
+
+  <!-- Header -->
+  <header class="glass-panel sticky top-0 z-50 px-6 py-3 border-b border-slate-700/60 flex items-center justify-between">
+    <div class="flex items-center space-x-3">
+      <div class="w-9 h-9 rounded-lg bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center font-bold text-white shadow-lg">
+        PLP
+      </div>
+      <div>
+        <h1 class="text-base font-bold text-slate-100 flex items-center gap-2">
+          pyPLP Simulator
+          <span class="text-xs px-2 py-0.5 rounded-full bg-cyan-950 text-cyan-400 border border-cyan-800 font-mono font-medium">In Silico Molecular Studio</span>
+        </h1>
+        <p class="text-xs text-slate-400">Padlock Probe Target Hybridization, SplintR Ligation, Phi29 RCA & Concatemer Detection</p>
+      </div>
+    </div>
+
+    <!-- Quick Presets -->
+    <div class="flex flex-wrap items-center gap-1.5">
+      <span class="text-xs text-slate-400 hidden lg:inline">Presets:</span>
+      <button onclick="loadPreset('mtb_dna')" class="px-2.5 py-1 text-xs font-medium rounded-md bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 transition">
+        MTB Singleplex (DNA)
+      </button>
+      <button onclick="loadPreset('rna_splintr')" class="px-2.5 py-1 text-xs font-medium rounded-md bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-700/60 text-emerald-300 transition">
+        RNA Target (SplintR)
+      </button>
+      <button onclick="loadPreset('gap_fail')" class="px-2.5 py-1 text-xs font-medium rounded-md bg-rose-950/60 hover:bg-rose-900 border border-rose-800/50 text-rose-300 transition">
+        1-bp Gap (Arrest)
+      </button>
+      <button onclick="loadPreset('mismatch_fail')" class="px-2.5 py-1 text-xs font-medium rounded-md bg-amber-950/60 hover:bg-amber-900 border border-amber-800/50 text-amber-300 transition">
+        3'-Mismatch
+      </button>
+      <button onclick="loadPreset('primer_fail')" class="px-2.5 py-1 text-xs font-medium rounded-md bg-rose-950/60 hover:bg-rose-900 border border-rose-800/50 text-rose-300 transition">
+        Non-Comp Primer
+      </button>
+      <button onclick="loadPreset('probe_fail')" class="px-2.5 py-1 text-xs font-medium rounded-md bg-purple-950/60 hover:bg-purple-900 border border-purple-800/50 text-purple-300 transition">
+        Non-Comp Probe
+      </button>
+      <div class="w-[1px] h-5 bg-slate-700 mx-1 hidden sm:block"></div>
+      <button onclick="toggleSidebar()" id="btn-toggle-sidebar" class="px-3 py-1 text-xs font-semibold rounded-md bg-gradient-to-r from-cyan-600/40 to-blue-600/40 hover:from-cyan-600 hover:to-blue-600 border border-cyan-500/50 text-cyan-200 hover:text-white transition flex items-center gap-1.5 shadow" title="Toggle Reaction Parameters (Expands Canvas to Full Width)">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2"/></svg>
+        <span id="btn-sidebar-text">Parameters Panel</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Container (Full Width) -->
+  <main class="flex-1 w-full px-4 lg:px-6 py-4 grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+    <!-- Left / Center: Interactive Canvas & Visual Simulation (8 cols or 12 cols when collapsed) -->
+    <div id="main-content-col" class="lg:col-span-8 flex flex-col space-y-4 transition-all duration-300">
+      <!-- Animation Canvas Stage Container (Increased Height to 860px & Dynamic Width) -->
+      <div id="canvas-container" class="relative glass-panel rounded-2xl overflow-hidden border border-slate-700/80 shadow-2xl flex flex-col h-[860px]">
+        
+        <!-- Canvas Overlay HUD: Stage Title & Description -->
+        <div class="absolute top-4 left-4 z-20 pointer-events-none max-w-sm sm:max-w-md">
+          <div class="flex items-center gap-2">
+            <span id="hud-stage-num" class="px-2 py-0.5 rounded bg-blue-500/20 text-blue-400 font-mono text-xs font-bold border border-blue-500/30">STAGE 1</span>
+            <span id="hud-reaction-temp" class="px-2 py-0.5 rounded bg-slate-800/80 text-slate-300 font-mono text-xs border border-slate-700">37.0°C</span>
+            <span id="hud-nick-status" class="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-mono text-xs font-bold border border-emerald-500/30">0-BP FLUSH NICK</span>
+          </div>
+          <h2 id="hud-title" class="text-base sm:text-lg font-extrabold text-white mt-1 drop-shadow-md">Initial Target & Padlock Probe Approaching</h2>
+          <p id="hud-desc" class="text-xs text-slate-300 leading-relaxed drop-shadow">Single-stranded target sequence and linear Padlock Probe with 5' Left Arm and 3' Right Arm in solution.</p>
+        </div>
+
+        <!-- Canvas Overlay: Zoom Controls, Fullscreen & Sequence Reveal Badge -->
+        <div class="absolute top-4 right-4 z-20 flex flex-col items-end gap-1.5">
+          <div class="glass-panel rounded-xl p-1 flex items-center space-x-1 border border-slate-700/80 shadow-lg">
+            <button onclick="zoomCanvas(1.25)" class="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 transition text-xs font-bold" title="Zoom In (or use Mouse Wheel)">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>
+            </button>
+            <span id="zoom-badge" class="font-mono text-xs font-bold px-2 py-0.5 rounded bg-slate-900/90 text-cyan-300 min-w-[50px] text-center border border-slate-800">100%</span>
+            <button onclick="zoomCanvas(0.8)" class="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 transition text-xs font-bold" title="Zoom Out (or use Mouse Wheel)">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M20 12H4"/></svg>
+            </button>
+            <button onclick="resetZoomPan()" class="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition text-xs font-mono font-bold px-2" title="Reset View (100%)">
+              1:1
+            </button>
+            <div class="w-[1px] h-4 bg-slate-700"></div>
+            <button onclick="toggleFullscreen()" class="p-1.5 rounded-lg bg-blue-600/40 hover:bg-blue-600 border border-blue-500/50 text-blue-200 hover:text-white transition text-xs font-bold shadow flex items-center justify-center" title="Toggle Fullscreen (or press 'F')">
+              <svg id="icon-maximize" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/></svg>
+              <svg id="icon-minimize" class="w-3.5 h-3.5 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M9 4v5H4m11-5v5h5M4 15h5v5m11-5h-5v5"/></svg>
+            </button>
+            <div class="w-[1px] h-4 bg-slate-700"></div>
+            <button onclick="toggleSettingsModal()" class="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition text-xs font-bold shadow flex items-center justify-center" title="Nucleotide Spacing & Visualization Settings">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+            </button>
+          </div>
+          <div id="zoom-hint" class="text-[10px] text-slate-400 font-mono bg-slate-900/80 px-2.5 py-0.5 rounded-md border border-slate-800 shadow">
+            Scroll: Zoom • Drag: Pan • F: Fullscreen
+          </div>
+
+          <!-- Floating Visualization & Spacing Settings Drawer -->
+          <div id="settings-modal" class="glass-panel rounded-2xl p-4 w-72 border border-slate-600/80 shadow-2xl mt-1 hidden">
+            <div class="flex items-center justify-between border-b border-slate-700/80 pb-2 mb-3">
+              <h4 class="text-xs font-bold text-white flex items-center gap-1.5">
+                <svg class="w-3.5 h-3.5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"/></svg>
+                Display & Spacing Settings
+              </h4>
+              <button onclick="toggleSettingsModal()" class="text-slate-400 hover:text-white text-xs p-1">✕</button>
+            </div>
+
+            <!-- Nucleotide Spacing (Pitch) -->
+            <div class="mb-3">
+              <div class="flex justify-between items-center text-xs mb-1">
+                <span class="text-slate-300 font-medium">Nucleotide Spacing</span>
+                <span id="spacing-val" class="font-mono text-cyan-300 text-[11px] font-bold">32 px</span>
+              </div>
+              <input id="slider-spacing" type="range" min="16" max="64" value="32" step="2" oninput="updateSettings('spacing', this.value)" class="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-cyan-400">
+              <div class="flex justify-between text-[9px] text-slate-500 mt-0.5 font-mono">
+                <span>16px (Dense)</span>
+                <span>32px (Roomy)</span>
+                <span>64px (Wide)</span>
+              </div>
+            </div>
+
+            <!-- Nucleotide Node Radius -->
+            <div class="mb-3">
+              <div class="flex justify-between items-center text-xs mb-1">
+                <span class="text-slate-300 font-medium">Nucleotide Node Size</span>
+                <span id="radius-val" class="font-mono text-cyan-300 text-[11px] font-bold">6 px</span>
+              </div>
+              <input id="slider-radius" type="range" min="6" max="16" value="6" step="1" oninput="updateSettings('radius', this.value)" class="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-cyan-400">
+            </div>
+
+            <!-- Stage 5 Circular Template Radius -->
+            <div class="mb-3">
+              <div class="flex justify-between items-center text-xs mb-1">
+                <span class="text-slate-300 font-medium">Stage 5 Circle Radius</span>
+                <span id="circle-radius-val" class="font-mono text-cyan-300 text-[11px] font-bold">260 px</span>
+              </div>
+              <input id="slider-circle-radius" type="range" min="50" max="260" value="260" step="5" oninput="setCircleRadius(this.value)" class="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-cyan-400">
+            </div>
+
+            <!-- Letter Visibility Mode -->
+            <div class="mb-3">
+              <label class="text-xs text-slate-300 font-medium block mb-1">Nucleotide Letters</label>
+              <div class="grid grid-cols-2 gap-1.5 text-xs">
+                <button onclick="updateSettings('lettersMode', 'auto')" id="btn-letters-auto" class="px-2 py-1 rounded bg-cyan-600 text-white font-semibold text-[11px] transition">Auto (Zoom)</button>
+                <button onclick="updateSettings('lettersMode', 'always')" id="btn-letters-always" class="px-2 py-1 rounded bg-slate-800 text-slate-400 hover:text-white font-semibold text-[11px] transition">Always On</button>
+              </div>
+            </div>
+
+            <!-- Presets -->
+            <div class="pt-2 border-t border-slate-700/80 flex items-center justify-between text-xs">
+              <span class="text-[10px] text-slate-400">Quick Spacing:</span>
+              <div class="flex space-x-1">
+                <button onclick="applySpacingPreset(22, 8)" class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[10px] text-slate-300">Compact</button>
+                <button onclick="applySpacingPreset(32, 10)" class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[10px] text-slate-300">Normal</button>
+                <button onclick="applySpacingPreset(46, 12)" class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[10px] text-slate-300">Spacious</button>
+              </div>
+            </div>
+
+            <!-- Canvas Text Config Button -->
+            <div class="pt-2 mt-2 border-t border-slate-700/80">
+              <button onclick="openTextConfigModal()" class="w-full py-1.5 px-2 rounded-lg bg-indigo-600/30 hover:bg-indigo-600/50 border border-indigo-500/40 text-indigo-200 hover:text-white text-[11px] font-semibold flex items-center justify-center gap-1.5 transition">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+                Adjust Canvas Text Content
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Canvas Text Customization Modal (Full control over all textual content) -->
+        <div id="text-config-modal" class="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 hidden">
+          <div class="bg-slate-900 border border-slate-700 rounded-2xl max-w-2xl w-full max-h-[85vh] flex flex-col shadow-2xl">
+            <!-- Modal Header -->
+            <div class="p-4 border-b border-slate-800 flex items-center justify-between">
+              <div>
+                <h3 class="text-sm font-bold text-white flex items-center gap-2">
+                  <span class="p-1 rounded bg-indigo-500/20 text-indigo-400 font-mono text-xs">CONFIG</span>
+                  Canvas Text & Labels Manager
+                </h3>
+                <p class="text-[11px] text-slate-400 mt-0.5">
+                  Loaded from <code class="text-cyan-300">pyPLP_simulator/web/canvas_config.js</code>. Adjust live or export updated config.
+                </p>
+              </div>
+              <button onclick="closeTextConfigModal()" class="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 text-sm">✕</button>
+            </div>
+
+            <!-- Category Tabs -->
+            <div class="flex border-b border-slate-800 bg-slate-950/50 px-4 text-xs overflow-x-auto">
+              <button onclick="switchConfigTab('strands')" id="tab-btn-strands" class="cfg-tab py-2.5 px-3 font-semibold border-b-2 border-indigo-500 text-indigo-400 transition whitespace-nowrap">1. Strands & Termini</button>
+              <button onclick="switchConfigTab('ligation')" id="tab-btn-ligation" class="cfg-tab py-2.5 px-3 font-medium border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition whitespace-nowrap">2. Ligation & Nick</button>
+              <button onclick="switchConfigTab('rcaPrimer')" id="tab-btn-rcaPrimer" class="cfg-tab py-2.5 px-3 font-medium border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition whitespace-nowrap">3. RCA Primer</button>
+              <button onclick="switchConfigTab('rollingCircle')" id="tab-btn-rollingCircle" class="cfg-tab py-2.5 px-3 font-medium border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition whitespace-nowrap">4. Phi29 & Concatemer</button>
+              <button onclick="switchConfigTab('detection')" id="tab-btn-detection" class="cfg-tab py-2.5 px-3 font-medium border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition whitespace-nowrap">5. Detection & Probes</button>
+              <button onclick="switchConfigTab('stages')" id="tab-btn-stages" class="cfg-tab py-2.5 px-3 font-medium border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition whitespace-nowrap">6. Stage Info</button>
+            </div>
+
+            <!-- Form Content (Scrollable) -->
+            <div id="cfg-form-container" class="p-4 overflow-y-auto space-y-3 flex-1 text-xs">
+              <!-- Dynamically populated by renderConfigForm() -->
+            </div>
+
+            <!-- Modal Footer -->
+            <div class="p-4 border-t border-slate-800 bg-slate-950 flex flex-wrap items-center justify-between gap-2">
+              <div class="flex items-center gap-2">
+                <button onclick="resetTextConfigToDefaults()" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-xs transition">
+                  Reset to Config File
+                </button>
+                <button onclick="exportConfigJs()" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-cyan-300 font-semibold text-xs transition flex items-center gap-1.5">
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                  Export canvas_config.js
+                </button>
+              </div>
+              <div class="flex items-center gap-2">
+                <button onclick="closeTextConfigModal()" class="px-3 py-1.5 rounded-lg text-slate-400 hover:text-white text-xs">
+                  Cancel
+                </button>
+                <button onclick="applyTextConfigFromModal()" class="px-4 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-lg shadow-indigo-500/25 transition">
+                  Apply Changes
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Canvas Overlay: In-Canvas Protocol Actions Floating Toolbar -->
+        <div id="canvas-protocol-toolbar" class="absolute bottom-14 inset-x-3 sm:inset-x-4 z-20 glass-panel rounded-xl p-2 px-3 flex flex-wrap items-center justify-between gap-2 border border-slate-700/80 shadow-2xl backdrop-blur-md bg-slate-900/85">
+          <div class="flex flex-wrap items-center gap-1.5">
+            <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400 mr-1 hidden sm:inline">Protocol:</span>
+            <button id="btn-proto-target" onclick="protocolAddTarget()" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-xs transition flex items-center gap-1">
+              <span class="text-amber-400 font-bold">+</span> Add Target
+            </button>
+            <button id="btn-proto-plp" onclick="protocolAddPLP()" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-xs transition flex items-center gap-1">
+              <span class="text-purple-400 font-bold">+</span> Add PLP
+            </button>
+            <button id="btn-proto-ligase" onclick="protocolAddLigase()" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-xs transition flex items-center gap-1">
+              <span class="text-emerald-400 font-bold">+</span> Add Ligase
+            </button>
+            <button id="btn-proto-primer" onclick="protocolAddPrimer()" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-xs transition flex items-center gap-1">
+              <span class="text-rose-400 font-bold">+</span> Add RCA Primer
+            </button>
+            <button id="btn-proto-phi29" onclick="protocolAddPhi29()" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-xs transition flex items-center gap-1">
+              <span class="text-cyan-400 font-bold">+</span> Add phi29
+            </button>
+            <button id="btn-proto-probe" onclick="protocolAddProbe()" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-xs transition flex items-center gap-1">
+              <span class="text-yellow-400 font-bold">+</span> Add Probe
+            </button>
+          </div>
+
+          <!-- RCA Repeats Stepper & Spooling Progress & Clear Buffer -->
+          <div class="flex items-center gap-2">
+            <!-- Stage 5 Circular Template Radius Controller -->
+            <div id="ctrl-circle-radius-container" class="flex items-center bg-slate-800/90 rounded-lg p-0.5 border border-slate-700 text-xs transition-all duration-200" title="Stage 5 Circular Template Radius (Click + / − to resize)">
+              <span class="text-slate-400 px-2 text-[11px] font-medium hidden sm:inline">Circle Radius:</span>
+              <button type="button" onclick="changeCircleRadius(-5)" class="w-6 h-6 rounded bg-slate-700 hover:bg-slate-600 text-white font-bold text-xs flex items-center justify-center transition" title="Decrease Circle Radius (−5px)">−</button>
+              <input id="input-circle-radius" type="number" min="50" max="260" step="5" value="260" onchange="setCircleRadius(this.value)" oninput="setCircleRadius(this.value)" class="w-12 bg-transparent text-center font-mono text-xs text-cyan-300 font-bold outline-none" title="Circle Radius in px">
+              <button type="button" onclick="changeCircleRadius(5)" class="w-6 h-6 rounded bg-slate-700 hover:bg-slate-600 text-white font-bold text-xs flex items-center justify-center transition" title="Increase Circle Radius (+5px)">+</button>
+            </div>
+
+            <div class="flex items-center bg-slate-800/90 rounded-lg p-0.5 border border-slate-700 text-xs">
+              <span class="text-slate-400 px-2 text-[11px] font-medium hidden md:inline">RCA Repeats:</span>
+              <button onclick="changeRcaRepeats(-1)" class="w-6 h-6 rounded bg-slate-700 hover:bg-slate-600 text-white font-bold text-xs flex items-center justify-center transition">−</button>
+              <input id="input-rca-repeats" type="number" min="1" max="20" value="3" onchange="setRcaRepeats(this.value)" class="w-10 bg-transparent text-center font-mono text-xs text-cyan-300 font-bold outline-none">
+              <button onclick="changeRcaRepeats(1)" class="w-6 h-6 rounded bg-slate-700 hover:bg-slate-600 text-white font-bold text-xs flex items-center justify-center transition">+</button>
+            </div>
+            <div class="text-[11px] font-mono text-slate-400 px-1 hidden lg:block">
+              Spooling: <span id="repeats-counter" class="text-cyan-300 font-bold">0 / 3</span>
+            </div>
+            <button onclick="protocolResetBuffer()" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-rose-950/80 text-slate-400 hover:text-rose-300 border border-slate-700 hover:border-rose-700/50 text-xs transition flex items-center gap-1" title="Clear Buffer & Reset Reaction">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+              <span>Clear</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- HTML5 2D Canvas -->
+        <canvas id="reactionCanvas" class="w-full h-full block bg-[#0a0f1d] cursor-grab active:cursor-grabbing"></canvas>
+
+        <!-- Bottom Playback Controls Bar -->
+        <div class="absolute bottom-0 inset-x-0 glass-panel border-t border-slate-700/80 px-4 py-2.5 flex items-center justify-between z-20">
+          <div class="flex items-center space-x-2">
+            <button onclick="prevStage()" class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 transition text-xs font-semibold" title="Previous Stage">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+            </button>
+            <button id="btn-play-pause" onclick="togglePlay()" class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold transition text-xs flex items-center gap-1.5 shadow-lg shadow-blue-500/30">
+              <svg id="icon-play" class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+              <svg id="icon-pause" class="w-4 h-4 hidden" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+              <span id="btn-play-text">Play</span>
+            </button>
+            <button onclick="nextStage()" class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 transition text-xs font-semibold" title="Next Stage">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+            </button>
+            <button onclick="resetSimulation()" class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 transition text-xs" title="Reset Simulation">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+            </button>
+          </div>
+
+          <!-- Color & Nucleotide Legend -->
+          <div class="hidden lg:flex items-center space-x-3 text-[11px] font-mono">
+            <span class="flex items-center gap-1 text-emerald-400"><span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span> A</span>
+            <span class="flex items-center gap-1 text-rose-400"><span class="w-2.5 h-2.5 rounded-full bg-rose-500"></span> T/U</span>
+            <span class="flex items-center gap-1 text-sky-400"><span class="w-2.5 h-2.5 rounded-full bg-sky-500"></span> C</span>
+            <span class="flex items-center gap-1 text-amber-400"><span class="w-2.5 h-2.5 rounded-full bg-amber-500"></span> G</span>
+            <span class="text-slate-600">|</span>
+            <span class="flex items-center gap-1 text-cyan-400"><span class="w-2.5 h-2.5 rounded-full bg-cyan-400"></span> Left Arm</span>
+            <span class="flex items-center gap-1 text-emerald-400"><span class="w-2.5 h-2.5 rounded-full bg-emerald-400"></span> Right Arm</span>
+            <span class="flex items-center gap-1 text-purple-400"><span class="w-2.5 h-2.5 rounded-full bg-purple-500"></span> Backbone</span>
+            <span class="flex items-center gap-1 text-rose-400"><span class="w-2.5 h-2.5 rounded-full bg-rose-400"></span> Primer</span>
+            <span class="flex items-center gap-1 text-yellow-400"><span class="w-2.5 h-2.5 rounded-full bg-yellow-400"></span> Probe</span>
+            <span class="text-slate-600">|</span>
+            <span class="flex items-center gap-1.5 text-blue-400 font-semibold"><span class="w-2.5 h-2.5 rounded-full bg-blue-500 border border-blue-300 shadow-[0_0_8px_#3b82f6]"></span> Phi29 Polymerase</span>
+          </div>
+
+          <!-- Animation Speed Control: Horizontal Range Slider -->
+          <div class="flex items-center space-x-2 bg-slate-800/90 border border-slate-700/80 rounded-lg px-2.5 py-1 shadow">
+            <span class="text-xs text-slate-400 font-medium hidden sm:inline">Speed:</span>
+            <input type="range" id="speedSlider" min="0.25" max="4.0" step="0.25" value="1.0" oninput="setSpeed(this.value)" class="w-20 sm:w-24 h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-cyan-400">
+            <span id="speedVal" class="text-xs font-mono font-bold text-cyan-400 w-9 text-right">1.00x</span>
+          </div>
+
+          <!-- Floating dNTPs Toggle Checkbox -->
+          <label class="flex items-center space-x-1.5 bg-slate-800/90 hover:bg-slate-700/80 border border-slate-700/80 rounded-lg px-2.5 py-1 shadow cursor-pointer transition select-none" title="Toggle visibility of floating dNTP molecules in solution">
+            <input type="checkbox" id="toggleDntpCheckbox" onchange="toggleShowDntps(this.checked)" class="rounded w-3.5 h-3.5 accent-cyan-400 cursor-pointer">
+            <span class="text-xs font-semibold text-slate-300">dNTPs</span>
+          </label>
+        </div>
+
+      </div>
+
+      <!-- Live Biophysical & QC Diagnostic Summary -->
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
+        <div class="glass-panel rounded-xl p-3">
+          <div class="text-[11px] text-slate-400">Nick Junction Status</div>
+          <div id="stat-nick" class="text-sm font-bold text-emerald-400 font-mono mt-0.5">0 bp Flush Nick</div>
+          <div id="stat-proofreading" class="text-[10px] text-slate-500 font-mono mt-0.5">-1(A) / +1(C)</div>
+        </div>
+        <div class="glass-panel rounded-xl p-3">
+          <div class="text-[11px] text-slate-400">Arm Melting Temperatures</div>
+          <div id="stat-tm" class="text-sm font-bold text-cyan-400 font-mono mt-0.5">47.7°C / 52.4°C</div>
+          <div id="stat-deltatm" class="text-[10px] text-slate-400 font-mono mt-0.5">ΔTm: 4.7°C (≤ 6°C)</div>
+        </div>
+        <div class="glass-panel rounded-xl p-3">
+          <div class="text-[11px] text-slate-400">RCA Primer Docking</div>
+          <div id="stat-primer" class="text-sm font-bold text-rose-400 font-mono mt-0.5">Unique Site Found</div>
+          <div id="stat-primer-tm" class="text-[10px] text-slate-400 font-mono mt-0.5">Tm: 55.4°C</div>
+        </div>
+        <div class="glass-panel rounded-xl p-3">
+          <div class="text-[11px] text-slate-400">Overall Viability</div>
+          <div id="stat-viability" class="text-sm font-bold text-emerald-400 font-mono mt-0.5 flex items-center gap-1">
+            <svg class="w-4 h-4 text-emerald-400" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
+            PASS (Viable)
+          </div>
+          <div id="stat-viability-desc" class="text-[10px] text-slate-400 font-mono mt-0.5">SplintR / T4 Ligatable</div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Right: Sequence Inputs & Interactive Laboratory Parameters (4 cols or Collapsed) -->
+    <div id="sidebar-col" class="lg:col-span-4 flex flex-col space-y-4 transition-all duration-300">
+      
+      <!-- Sequence Config Card -->
+      <!-- Sequence Config Card (Collapsible) -->
+      <div id="rxn-params-card" class="glass-panel rounded-2xl p-5 border border-slate-700/80 shadow-xl flex flex-col space-y-4 transition-all duration-300">
+        <div onclick="toggleReactionParams()" class="flex items-center justify-between border-b border-slate-700/80 pb-3 cursor-pointer select-none group hover:border-slate-600 transition" title="Click to Collapse / Expand Reaction Parameters">
+          <h3 class="text-sm font-bold text-white flex items-center gap-2 group-hover:text-cyan-300 transition">
+            <svg class="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"/></svg>
+            Reaction Parameters
+          </h3>
+          <div class="flex items-center gap-2">
+            <span id="rxn-params-status" class="text-[11px] text-slate-400 group-hover:text-slate-300 transition">Interactive Inputs</span>
+            <button type="button" class="p-1 rounded-md text-slate-400 group-hover:text-white hover:bg-slate-800 transition" aria-label="Toggle Reaction Parameters">
+              <svg id="rxn-params-chevron" class="w-4 h-4 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 9l-7 7-7-7"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- Collapsible Body Container -->
+        <div id="rxn-params-body" class="space-y-4">
+          <!-- Target Sequence Input -->
+          <div>
+            <div class="flex justify-between items-center text-xs mb-1">
+              <label class="font-semibold text-amber-300 flex items-center gap-1.5">
+                <span class="w-2 h-2 rounded-full bg-amber-400"></span>
+                Target Sequence (5' → 3')
+              </label>
+              <span id="target-len" class="font-mono text-[10px] text-slate-400">50 nt</span>
+            </div>
+            <textarea id="input-target" rows="2" class="w-full bg-slate-900/90 border border-slate-700 rounded-lg p-2 font-mono text-xs text-amber-200 outline-none focus:border-amber-400 transition resize-none"></textarea>
+          </div>
+
+          <!-- Padlock Probe (PLP) Sequence Input -->
+          <div>
+            <div class="flex justify-between items-center text-xs mb-1">
+              <label class="font-semibold text-slate-200 flex items-center gap-1.5">
+                <span class="w-2 h-2 rounded-full bg-purple-400"></span>
+                Padlock Probe (PLP 5' → 3')
+              </label>
+              <span id="plp-len" class="font-mono text-[10px] text-slate-400">70 nt</span>
+            </div>
+            <div class="text-[10px] text-slate-400 mb-1 flex gap-2 font-mono">
+              <span class="text-cyan-400">Left Arm: <span id="left-arm-tag">15 nt</span></span>
+              <span class="text-purple-400">Backbone: <span id="backbone-tag">40 nt</span></span>
+              <span class="text-emerald-400">Right Arm: <span id="right-arm-tag">15 nt</span></span>
+            </div>
+            <textarea id="input-plp" rows="3" class="w-full bg-slate-900/90 border border-slate-700 rounded-lg p-2 font-mono text-xs text-slate-200 outline-none focus:border-purple-400 transition resize-none"></textarea>
+          </div>
+
+          <!-- RCA Primer Input -->
+          <div>
+            <div class="flex justify-between items-center text-xs mb-1">
+              <label class="font-semibold text-rose-300 flex items-center gap-1.5">
+                <span class="w-2 h-2 rounded-full bg-rose-400"></span>
+                RCA Primer (5' → 3')
+              </label>
+              <span id="primer-len" class="font-mono text-[10px] text-slate-400">18 nt</span>
+            </div>
+            <input id="input-primer" type="text" class="w-full bg-slate-900/90 border border-slate-700 rounded-lg px-2.5 py-1.5 font-mono text-xs text-rose-200 outline-none focus:border-rose-400 transition">
+          </div>
+
+          <!-- Detection Probe Input -->
+          <div>
+            <div class="flex justify-between items-center text-xs mb-1">
+              <label class="font-semibold text-yellow-300 flex items-center gap-1.5">
+                <span class="w-2 h-2 rounded-full bg-yellow-400"></span>
+                Detection Probe (5' → 3', FAM)
+              </label>
+              <span id="probe-len" class="font-mono text-[10px] text-slate-400">18 nt</span>
+            </div>
+            <input id="input-probe" type="text" class="w-full bg-slate-900/90 border border-slate-700 rounded-lg px-2.5 py-1.5 font-mono text-xs text-yellow-200 outline-none focus:border-yellow-400 transition">
+          </div>
+
+          <!-- Environmental Conditions -->
+          <div class="grid grid-cols-2 gap-3 pt-1">
+            <div>
+              <label class="text-[11px] font-semibold text-slate-300 block mb-1">Reaction Temp (°C)</label>
+              <input id="input-temp" type="number" step="0.5" value="37.0" class="w-full bg-slate-900/90 border border-slate-700 rounded-lg px-2.5 py-1.5 font-mono text-xs text-slate-200 outline-none focus:border-blue-400">
+            </div>
+            <div>
+              <label class="text-[11px] font-semibold text-slate-300 block mb-1">Target Molecule</label>
+              <select id="select-target-type" class="w-full bg-slate-900/90 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 outline-none focus:border-blue-400">
+                <option value="RNA">RNA (SplintR Ligase)</option>
+                <option value="DNA" selected>DNA (T4 Ligase / Ampligase)</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Run / Update Button -->
+          <button onclick="applyUserInputs()" class="w-full py-2.5 rounded-xl bg-gradient-to-r from-blue-600 via-indigo-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white font-bold text-xs shadow-lg shadow-blue-500/25 transition transform active:scale-[0.99] flex items-center justify-center gap-2">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+            Re-Analyze & Update Simulation
+          </button>
+        </div>
+      </div>
+
+      <!-- Scientific Guide Card -->
+      <div class="glass-panel rounded-2xl p-4 border border-slate-700/80 text-xs space-y-2">
+        <h4 class="font-bold text-slate-200 flex items-center gap-1.5">
+          <svg class="w-4 h-4 text-emerald-400" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg>
+          Interactive Zoom & Inspection
+        </h4>
+        <p class="text-slate-400 leading-relaxed">
+          <strong class="text-slate-300">Inspect Real Bases:</strong> Use your mouse wheel or the <span class="text-cyan-400 font-bold">[ + ]</span> button to zoom in beyond 130%. Every single nucleotide (A, C, G, T, U) appears with its real sequence, terminal tags (5' and 3'-OH), and Watson-Crick base-pairing rungs.
+        </p>
+        <p class="text-slate-400 leading-relaxed">
+          <strong class="text-slate-300">Pan Anywhere:</strong> Click and drag anywhere on the canvas to freely navigate across the target strand, ligation nick, rolling circle, and growing concatemer.
+        </p>
+      </div>
+
+    </div>
+  </main>
+
+  <!-- Molecular Animation Engine Modules -->
+  <script src="canvas_config.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/presets.js"></script>
+  <script src="js/state.js"></script>
+  <script src="js/biophysics.js"></script>
+  <script src="js/protocol.js"></script>
+  <script src="js/stages.js"></script>
+  <script src="js/render_base.js"></script>
+  <script src="js/render_geometry.js"></script>
+  <script src="js/render_particles.js"></script>
+  <script src="js/render_stages.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,61 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@400;500;600;700;800&display=swap');
+
+:root {
+  --bg-dark: #0f172a;
+  --card-bg: #1e293b;
+  --border-color: #334155;
+  --cyan-arm: #06b6d4;
+  --green-arm: #10b981;
+  --purple-backbone: #a855f7;
+  --amber-target: #f59e0b;
+  --rose-primer: #f43f5e;
+  --yellow-probe: #eab308;
+}
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  background-color: var(--bg-dark);
+  color: #f8fafc;
+  overflow-x: hidden;
+}
+
+code, pre, .font-mono {
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* Custom Glass & Scrollbars */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: #0f172a; }
+::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #475569; }
+
+.glass-panel {
+  background: rgba(30, 41, 59, 0.75);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.badge-stage-active {
+  background: linear-gradient(135deg, #0284c7 0%, #2563eb 100%);
+  color: white;
+  box-shadow: 0 0 12px rgba(37, 99, 235, 0.5);
+}
+
+/* Fullscreen Mode */
+#canvas-container:fullscreen {
+  width: 100vw !important;
+  height: 100vh !important;
+  border-radius: 0 !important;
+  border: none !important;
+  margin: 0 !important;
+  background-color: #0a0f1d !important;
+}
+#canvas-container:-webkit-full-screen {
+  width: 100vw !important;
+  height: 100vh !important;
+  border-radius: 0 !important;
+  border: none !important;
+  margin: 0 !important;
+  background-color: #0a0f1d !important;
+}

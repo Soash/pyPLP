@@ -1,0 +1,43 @@
+{
+  "alignment": {
+    "mafft_env": "mafft_env",
+    "mafft_mode": "fast",
+    "mafft_threads": 8,
+    "min_conservation_pct": 100.0,
+    "min_block_len_bp": 30,
+    "ignore_gaps": false,
+    "auto_fallback": true,
+    "min_fallback_pct": 65.0,
+    "fallback_step": 1.0,
+    "target_strand": "positive"
+  },
+  "arm_design": {
+    "armLengths": [18],
+    "filter_by_tm": true,
+    "min_tm": 40.0,
+    "filter_by_homopolymer": true,
+    "maxHomopolymer": 4,
+    "filter_by_hairpin": true,
+    "max_hairpin_tm": 30.0,
+    "filter_by_arm_dimer": true,
+    "max_arm_dimer_dg": -1.0,
+    "blastdbDir": "blastdb",
+    "threads": 32,
+    "blastMinIdentity": 70.0,
+    "maxAllowedHits": 0,
+    "ligation_junction_filter": {
+      "enabled": false,
+      "min_gc_at_junction": 1,
+      "max_terminal_at_run": 2,
+      "check_nick_dimer": true,
+      "max_nick_dimer_bp": 3
+    },
+    "ligase_footprint_filter": {
+      "enabled": false,
+      "rescue_3prime_mismatches": false
+    }
+  },
+  "plp_generation": {
+    "enabled": false
+  }
+}

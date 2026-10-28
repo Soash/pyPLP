@@ -1,0 +1,685 @@
+"""pyPLP.multiplex.panel_optimizer: Joint optimization and cross-reactivity validation for multiplex PLP panels.
+"""
+
+import csv
+import os
+import random
+from Bio.Seq import Seq
+
+from pyPLP.multiplex.cross_dimer import calc_heterodimer_dg
+from pyPLP.plp_generation.structure_eval import eval_plp_structure
+from pyPLP.multiplex.fixed_panel import evaluate_fixed_channel, parse_fixed_oligos
+from pyPLP.multiplex.matrix_eval import (
+    compute_cross_reactivity_matrix,
+    save_cross_reactivity_matrix_csv,
+)
+from pyPLP.multiplex.probe_generator import (
+    generate_orthogonal_rca_primers,
+    generate_universal_detection_probe,
+)
+from pyPLP.plp_generation.backbone_optimizer import optimize_backbone_candidate
+from pyPLP.plp_generation.segmented_backbone import (
+    build_initial_segmented_backbone,
+    generate_random_oligo_matching_tm,
+    parse_segmented_backbone,
+    resolve_restriction_site,
+)
+from pyPLP.plp_generation.vienna_plot import render_vienna_svg
+from pyPLP.thermodynamics.hairpin import check_hairpin
+from pyPLP.thermodynamics.homopolymer import get_max_homopolymer
+from pyPLP.thermodynamics.metrics import compute_metrics
+from pyPLP.thermodynamics.mfold_detailed import eval_structure_mfold_detailed
+from pyPLP.thermodynamics.tm import calculate_tm
+
+
+def design_multiplex_panel(
+    targets: list[dict],
+    output_dir: str,
+    universal_detection_probe: str = "",
+    universal_rca_primer: str = "",  # Deprecated backward-compatibility alias
+    channel_labels: list[str] | None = None,
+    restriction_site: str = "",
+    fixed_panel: list[dict] | str | dict | None = None,
+    fixed_oligos: str | list | dict | None = None,
+    max_cross_dimer_dg: float = -2.0,
+    max_probe_to_noncognate_plp_dg: float = -4.0,
+    max_inter_plp_dg: float = -6.0,
+    spacer1_len: int = 4,
+    rca_binding_len: int = 20,
+    spacer2_len: int = 4,
+    probe_binding_len: int = 20,
+    spacer3_len: int = 0,
+    rest_len: int = 4,
+    cfg: dict | None = None,
+    keep_ct_ps: bool = False,
+    max_panel_attempts: int = 50,
+) -> dict:
+    """Designs an orthogonal multiplex (triplex or K-plex) padlock probe panel.
+
+    Each target channel receives an optimized, open PLP sharing a universal 5'-FAM detection probe
+    and bearing a distinct, mutually non-cross-reactive RCA primer (5'-Biotin, 5'-DIG, 5'-TAMRA, etc.).
+    Supports pre-existing fixed PLP and oligo sets, ensuring new probes do not interfere with fixed sets.
+    """
+    re_site_input = restriction_site
+    if cfg:
+        arch = cfg.get("plp_generation", {}).get("backbone_architecture", {})
+        spacer1_len = int(arch.get("spacer1_len", spacer1_len))
+        rca_binding_len = int(arch.get("rca_primer_binding_len", rca_binding_len))
+        spacer2_len = int(arch.get("spacer2_len", spacer2_len))
+        probe_binding_len = int(arch.get("probe_binding_len", probe_binding_len))
+        spacer3_len = int(arch.get("spacer3_len", spacer3_len))
+        rest_len = int(arch.get("rest_len", rest_len))
+        re_mode = arch.get("re_mode", "standalone")
+        re_probe_offset = int(arch.get("re_probe_offset", 2))
+        if not re_site_input:
+            re_site_input = arch.get("restriction_site", "")
+    else:
+        re_mode = "standalone"
+        re_probe_offset = 2
+
+    re_motif = resolve_restriction_site(re_site_input) if re_site_input else ""
+
+    # Parse fixed reference panel / oligos if supplied
+    fixed_src = fixed_panel or fixed_oligos
+    if not fixed_src and cfg:
+        fixed_src = cfg.get("multiplex", {}).get("fixed_panel") or cfg.get("multiplex", {}).get("fixed_oligos")
+
+    parsed_fixed = parse_fixed_oligos(fixed_src) if fixed_src else {"universal_detection_probe": "", "channels": []}
+    fixed_channel_data = parsed_fixed.get("channels", [])
+    num_fixed = len(fixed_channel_data)
+
+    os.makedirs(output_dir, exist_ok=True)
+    struct_dir = os.path.join(output_dir, "plp_structures")
+    vienna_dir = os.path.join(struct_dir, "vienna")
+    mfold_dir = os.path.join(struct_dir, "mfold")
+    os.makedirs(vienna_dir, exist_ok=True)
+    os.makedirs(mfold_dir, exist_ok=True)
+
+    plp_cfg = cfg.get("plp_generation", {}) if cfg else {}
+    plp_per_arm = int(plp_cfg.get("plp_per_arm", 5))
+    min_plp_mfe_dg = float(plp_cfg.get("min_plp_mfe_dg", -6.0))
+    max_paired_arm_bases = int(plp_cfg.get("max_paired_arm_bases", 4))
+    bb_factor = plp_cfg.get("backbone_length_factor", "N/A")
+    max_paired_total = plp_cfg.get("max_paired_total_bases", "N/A")
+
+    num_targets = len(targets)
+    total_channels = num_fixed + num_targets
+    default_labels = ["5'-Biotin", "5'-DIG", "5'-TAMRA", "5'-Cy5", "5'-TexasRed"]
+    labels = channel_labels or default_labels[:total_channels]
+    if labels and labels[0] == "5'-FAM":
+        labels[0] = "5'-Biotin"
+    if len(labels) < total_channels:
+        labels.extend([f"Channel_{i+1}" for i in range(len(labels), total_channels)])
+
+    channel_groups = []
+    # 1. Add fixed reference channels
+    for f_idx, f_ch in enumerate(fixed_channel_data):
+        ch_idx = f_idx + 1
+        ch_label = f_ch.get("channel_label") or (labels[f_idx] if f_idx < len(labels) else f"Channel_{ch_idx}")
+        f_eval = evaluate_fixed_channel(f_ch, channel_idx=ch_idx)
+        channel_groups.append({
+            "pathogen": f_ch.get("target_name", f"Fixed_Target_{ch_idx}"),
+            "channel_idx": ch_idx,
+            "channel_label": ch_label,
+            "arms": [],
+            "is_fixed": True,
+            "fixed_data": f_eval,
+        })
+
+    # 2. Add newly supplied target channels
+    for idx, item in enumerate(targets):
+        ch_idx = num_fixed + idx + 1
+        ch_label = labels[num_fixed + idx] if (num_fixed + idx) < len(labels) else f"Channel_{ch_idx}"
+        if isinstance(item, dict) and "arms" in item:
+            channel_groups.append({
+                "pathogen": item.get("pathogen", f"Channel_{ch_idx}"),
+                "channel_idx": ch_idx,
+                "channel_label": ch_label,
+                "arms": item["arms"],
+                "is_fixed": False,
+            })
+        else:
+            channel_groups.append({
+                "pathogen": item.get("pathogen", item.get("organism", f"Channel_{ch_idx}")),
+                "channel_idx": ch_idx,
+                "channel_label": ch_label,
+                "arms": [item],
+                "is_fixed": False,
+            })
+
+    num_channels = len(channel_groups)
+    total_expected_plps = sum(
+        1 if ch.get("is_fixed") else len(ch["arms"]) * plp_per_arm
+        for ch in channel_groups
+    )
+    all_target_arms = [
+        (a["left_arm"], a["right_arm"])
+        for ch in channel_groups if not ch.get("is_fixed")
+        for a in ch["arms"]
+    ]
+
+    # 1. Determine or dynamically design Universal Detection Probe (5'-FAM)
+    univ_probe = str(universal_detection_probe).strip().upper() if universal_detection_probe else ""
+    if not univ_probe and parsed_fixed.get("universal_detection_probe"):
+        univ_probe = parsed_fixed["universal_detection_probe"]
+    if not univ_probe and cfg:
+        univ_probe = str(
+            cfg.get("plp_generation", {}).get("backbone_architecture", {}).get("universal_probe_seq", "")
+            or cfg.get("multiplex", {}).get("universal_detection_probe", "")
+            or cfg.get("multiplex", {}).get("universal_probe", "")
+        ).strip().upper()
+
+    probe_meta = generate_universal_detection_probe(
+        probe_length=probe_binding_len,
+        target_tm=50.0,
+        tm_tol=3.5,
+        max_cross_dg=max_cross_dimer_dg,
+        max_homo=4,
+        max_hairpin_tm=28.0,
+        predefined_seq=univ_probe,
+        target_arms_list=all_target_arms,
+    )
+    if not probe_meta:
+        raise RuntimeError("Failed to generate or validate a valid Universal Detection Probe satisfying biophysical criteria.")
+
+    univ_probe = probe_meta["seq"]
+    probe_tm = probe_meta["tm"]
+    probe_gc = probe_meta["gc"]
+
+    print("=" * 80)
+    print(f"MULTIPLEX ({num_channels}-PLEX) PADLOCK PROBE PANEL DESIGNER")
+    print("=" * 80)
+    print(f"Output Directory           : {output_dir}")
+    print(f"Universal Detection Probe  : {univ_probe} ({len(univ_probe)} nt, Tm: {probe_tm:.2f}°C, 5'-FAM)")
+    if re_motif:
+        print(f"Restriction Enzyme Site    : {re_motif} ({re_site_input})")
+    print(f"Cross-Dimer dG Cutoff      : >= {max_cross_dimer_dg} kcal/mol")
+    print(f"PLPs per Arm Target        : {plp_per_arm}")
+    print(f"Backbone Length Factor     : {bb_factor}")
+    print(f"Min PLP MFE dG             : >= {min_plp_mfe_dg} kcal/mol")
+    print(f"Max Paired Arm Bases       : <= {max_paired_arm_bases} bp")
+    print(f"Max Paired Total Bases     : <= {max_paired_total} bp")
+    
+    actual_re_len = len(re_motif) if re_mode == "standalone" else 0
+    bb_len = spacer1_len + rca_binding_len + spacer2_len + probe_binding_len + spacer3_len + actual_re_len + rest_len
+    
+    print(f"Backbone Architecture      : Spacer1({spacer1_len}nt) + RCA({rca_binding_len}nt) + Spacer2({spacer2_len}nt) + Probe({probe_binding_len}nt) + Spacer3({spacer3_len}nt) + RE({actual_re_len}nt) + Rest({rest_len}nt) = {bb_len} nt")
+
+    if all_target_arms:
+        sample_l, sample_r = all_target_arms[0]
+        sample_plp_len = len(sample_l) + len(sample_r) + bb_len
+        print(f"PLP Length (Sample)        : {sample_plp_len} nt (Backbone: {bb_len} nt)")
+    else:
+        print(f"PLP Backbone Length        : {bb_len} nt")
+        
+    print(f"Target Channels ({num_channels})        :")
+    for ch in channel_groups:
+        idx = ch["channel_idx"]
+        lbl = ch["channel_label"]
+        p_name = ch["pathogen"]
+        print(f"  [Channel {idx}] {p_name} (RCA Primer Reporter: {lbl}, {len(ch['arms'])} candidate arm(s)):")
+        for arm_i, arm in enumerate(ch["arms"], 1):
+            cons_info = f", Conservation: {arm.get('conservation_pct')}%" if arm.get("conservation_pct") else ""
+            print(f"     -> Arm {arm_i} [{arm.get('name', f'Arm_{arm_i}')}]: Left={arm['left_arm']}, Right={arm['right_arm']}{cons_info}")
+    print(f"Total PLPs to Generate     : {total_expected_plps}")
+    print("-" * 80 + "\n")
+
+    best_panel = None
+
+    univ_rca = str(universal_rca_primer).strip().upper() if universal_rca_primer else ""
+    
+    for panel_attempt in range(1, max_panel_attempts + 1):
+        # Step 2: Generate mutually orthogonal RCA primer set for the channels
+        predefined_primers = []
+        for ch in channel_groups:
+            if ch.get("is_fixed"):
+                predefined_primers.append(ch["fixed_data"]["rca_primer_seq"])
+            else:
+                predefined_primers.append(univ_rca if univ_rca else None)
+                
+        fixed_plp_seqs = [ch["fixed_data"]["full_plp"] for ch in channel_groups if ch.get("is_fixed")]
+        fixed_rca_seqs = [ch["fixed_data"]["rca_primer_seq"] for ch in channel_groups if ch.get("is_fixed")]
+
+        rca_primers = generate_orthogonal_rca_primers(
+            channel_count=num_channels,
+            universal_probe_seq=univ_probe,
+            primer_length=rca_binding_len,
+            target_tm=probe_tm,
+            tm_tol=3.5,
+            max_cross_dg=max_cross_dimer_dg,
+            predefined_primers=predefined_primers,
+            channel_labels=[ch["channel_label"] for ch in channel_groups],
+            fixed_plps=fixed_plp_seqs,
+            fixed_rca_primers=fixed_rca_seqs,
+            target_arms_list=all_target_arms,
+        )
+        if not rca_primers:
+            continue
+
+        # Step 3: Design each PLP with channel-specific RCA primer binding, universal probe binding, and optional restriction site
+        designed_plps = []
+        all_plps_open = True
+
+        for ch_idx, ch in enumerate(channel_groups):
+            channel_num = ch["channel_idx"]
+            rca_meta = rca_primers[ch_idx]
+            rca_seq = rca_meta["seq"]
+            channel_label = ch["channel_label"]
+            pathogen_name = ch["pathogen"]
+
+            if ch.get("is_fixed"):
+                f_data = ch["fixed_data"]
+                f_db = f_data["dot_bracket"]
+                fixed_plp_res = {
+                    "bb": "Fixed_Backbone",
+                    "full_plp": f_data["full_plp"],
+                    "full_gc": f_data["full_gc"],
+                    "full_tm": f_data["full_tm"],
+                    "bb_gc": 0.0,
+                    "bb_tm": 0.0,
+                    "bb_homo": "N/A",
+                    "dot_bracket": f_db,
+                    "mfe_dg": f_data["mfe_dg"],
+                    "paired_left": sum(1 for c in f_db[:15] if c in "()"),
+                    "paired_right": sum(1 for c in f_db[-15:] if c in "()"),
+                    "paired_total": sum(1 for c in f_db if c in "()"),
+                    "Spacer1_Seq": "N/A",
+                    "RCA_Primer_Binding_Region": str(Seq(rca_seq).reverse_complement()),
+                    "Spacer2_Seq": "N/A",
+                    "Probe_Binding_Region": f_data.get("detection_probe_seq") or univ_probe,
+                    "Restriction_Site_Seq": "N/A",
+                    "Rest_Backbone_Seq": "N/A",
+                    "plp_id": f_data["plp_id"],
+                    "target_name": f_data["target_name"],
+                    "organism": f_data["target_name"],
+                    "conservation_pct": "Fixed",
+                    "avg_conservation_pct": "Fixed",
+                    "left_arm": "Fixed",
+                    "right_arm": "Fixed",
+                    "channel_idx": channel_num,
+                    "channel_label": channel_label,
+                    "detection_probe_seq": univ_probe,
+                    "detection_probe_tm": probe_tm,
+                    "detection_probe_gc": probe_gc,
+                    "detection_probe_mod": "5'-FAM",
+                    "rca_primer_seq": rca_seq,
+                    "rca_primer_tm": rca_meta["tm"],
+                    "rca_primer_gc": rca_meta["gc"],
+                    "rca_primer_mod": channel_label,
+                    "is_fixed": True,
+                }
+                designed_plps.append(fixed_plp_res)
+                continue
+
+            rca_binding = str(Seq(rca_seq).reverse_complement())
+            for arm_idx, tgt in enumerate(ch["arms"], start=1):
+                left_arm = tgt["left_arm"]
+                right_arm = tgt["right_arm"]
+                len_l = len(left_arm)
+                len_r = len(right_arm)
+                cand_id = tgt.get("candidate_id", tgt.get("Candidate_ID", f"Arm{arm_idx}"))
+                tgt_name = tgt.get("name", f"{pathogen_name}_{cand_id}")
+
+                arm_plps = []
+                used_bbs = set()
+
+                for v in range(1, plp_per_arm + 1):
+                    plp_res = None
+                    for _ in range(300):
+                        s1 = "".join(random.choices(["A", "C", "T"], k=spacer1_len))
+                        s2 = "".join(random.choices(["A", "C", "T"], k=spacer2_len))
+                        s3 = "".join(random.choices(["A", "C", "T"], k=spacer3_len)) if spacer3_len > 0 else ""
+                        rest = "".join(random.choices(["A", "C", "T"], k=rest_len))
+
+                        if (
+                            get_max_homopolymer(s1)[0] >= 4
+                            or get_max_homopolymer(s2)[0] >= 4
+                            or (s3 and get_max_homopolymer(s3)[0] >= 4)
+                            or get_max_homopolymer(rest)[0] >= 4
+                        ):
+                            continue
+
+                        actual_re_motif = re_motif if re_mode == "standalone" else ""
+                        curr_bb = s1 + rca_binding + s2 + univ_probe + s3 + actual_re_motif + rest
+                        if curr_bb in used_bbs:
+                            continue
+
+                        full_plp = left_arm + curr_bb + right_arm
+
+                        dot_bracket, mfe_dg = eval_plp_structure(full_plp)
+                        pl = sum(1 for ch_char in dot_bracket[:len_l] if ch_char in "()")
+                        pr = sum(1 for ch_char in dot_bracket[-len_r:] if ch_char in "()")
+                        pt = sum(1 for ch_char in dot_bracket if ch_char in "()")
+
+                        if pl <= max_paired_arm_bases and pr <= max_paired_arm_bases and mfe_dg >= min_plp_mfe_dg:
+                            # Screen against all fixed PLPs to prevent cross-hybridization
+                            clash_fixed_plp = False
+                            for f_p in fixed_plp_seqs:
+                                if calc_heterodimer_dg(full_plp, f_p) < max_inter_plp_dg:
+                                    clash_fixed_plp = True
+                                    break
+                            if clash_fixed_plp:
+                                continue
+
+                            # Screen against all fixed RCA primers (crucial: fixed RCA primer must not prime new PLP)
+                            clash_fixed_rca = False
+                            for f_r in fixed_rca_seqs:
+                                if calc_heterodimer_dg(full_plp, f_r) < max_cross_dimer_dg:
+                                    clash_fixed_rca = True
+                                    break
+                            if clash_fixed_rca:
+                                continue
+
+                            used_bbs.add(curr_bb)
+                            bb_gc, bb_tm = compute_metrics(Seq(curr_bb))
+                            full_gc, full_tm = compute_metrics(Seq(full_plp))
+                            bb_homo_len, bb_homo_seq = get_max_homopolymer(curr_bb)
+
+                            if len(ch["arms"]) == 1 and plp_per_arm == 1:
+                                plp_id = f"PLP_{channel_num}_{tgt_name}"
+                            elif len(ch["arms"]) == 1:
+                                plp_id = f"PLP_{channel_num}_{tgt_name}_v{v}"
+                            else:
+                                plp_id = f"PLP_{channel_num}_{pathogen_name}_{cand_id}_v{v}"
+
+                            plp_res = {
+                                "bb": curr_bb,
+                                "full_plp": full_plp,
+                                "full_gc": full_gc,
+                                "full_tm": full_tm,
+                                "bb_gc": bb_gc,
+                                "bb_tm": bb_tm,
+                                "bb_homo": f"{bb_homo_len} ({bb_homo_seq})",
+                                "dot_bracket": dot_bracket,
+                                "mfe_dg": mfe_dg,
+                                "paired_left": pl,
+                                "paired_right": pr,
+                                "paired_total": pt,
+                                "Spacer1_Seq": s1,
+                                "RCA_Primer_Binding_Region": rca_binding,
+                                "Spacer2_Seq": s2,
+                                "Probe_Binding_Region": univ_probe,
+                                "Restriction_Site_Seq": re_motif,
+                                "Rest_Backbone_Seq": rest,
+                                "plp_id": plp_id,
+                                "target_name": tgt_name,
+                                "organism": tgt.get("organism") or tgt.get("pathogen", pathogen_name),
+                                "conservation_pct": tgt.get("conservation_pct", "N/A"),
+                                "avg_conservation_pct": tgt.get("avg_conservation_pct", "N/A"),
+                                "left_arm": left_arm,
+                                "right_arm": right_arm,
+                                "channel_idx": channel_num,
+                                "channel_label": channel_label,
+                                "detection_probe_seq": univ_probe,
+                                "detection_probe_tm": probe_tm,
+                                "detection_probe_gc": probe_gc,
+                                "detection_probe_mod": "5'-FAM",
+                                "rca_primer_seq": rca_seq,
+                                "rca_primer_tm": rca_meta["tm"],
+                                "rca_primer_gc": rca_meta["gc"],
+                                "rca_primer_mod": channel_label,
+                                "is_fixed": False,
+                            }
+                            arm_plps.append(plp_res)
+                            break
+
+                    if not plp_res:
+                        all_plps_open = False
+                        break
+
+                if not all_plps_open:
+                    break
+                designed_plps.extend(arm_plps)
+
+            if not all_plps_open:
+                break
+
+        if not all_plps_open or len(designed_plps) != total_expected_plps:
+            continue
+
+        # Step 4: Full multiplex cross-reactivity matrix verification
+        reaction_oligos = {"Universal_Detection_Probe": univ_probe}
+        for ch_idx, ch in enumerate(channel_groups):
+            ch_num = ch["channel_idx"]
+            p_tag = ch["pathogen"].replace(" ", "_")
+            reaction_oligos[f"RCA_Primer_{ch_num}_{p_tag}"] = rca_primers[ch_idx]["seq"]
+
+        for plp in designed_plps:
+            reaction_oligos[plp["plp_id"]] = plp["full_plp"]
+
+        matrix_data = compute_cross_reactivity_matrix(
+            reaction_oligos,
+            max_cross_dimer_dg=max_cross_dimer_dg,
+            max_probe_to_noncognate_plp_dg=max_probe_to_noncognate_plp_dg,
+            max_inter_plp_dg=max_inter_plp_dg,
+        )
+
+        if matrix_data["is_valid"]:
+            best_panel = {
+                "plps": designed_plps,
+                "rca_primers": rca_primers,
+                "universal_probe": univ_probe,
+                "probe_meta": probe_meta,
+                "channel_groups": channel_groups,
+                "matrix_data": matrix_data,
+            }
+            break
+
+    if not best_panel:
+        raise RuntimeError(
+            f"Unable to find a completely non-cross-reactive panel after {max_panel_attempts} cycles. "
+            f"Try relaxing max_cross_dimer_dg or re-running."
+        )
+
+    # Step 5: Render structures & Export Reports
+    panel_plps = best_panel["plps"]
+    rca_primers = best_panel["rca_primers"]
+    keep_ct = keep_ct_ps or bool(cfg.get("keep_ct_ps", False) if cfg else False)
+
+    for plp in panel_plps:
+        pid = plp["plp_id"]
+        svg_file = render_vienna_svg(pid, plp["full_plp"], plp["dot_bracket"], vienna_dir)
+        plp["vienna_plot"] = svg_file
+
+        m_dg, m_db, m_plot = eval_structure_mfold_detailed(
+            plp["full_plp"],
+            seq_id=pid,
+            output_dir=mfold_dir,
+            temperature=37.0,
+            keep_ct_ps=keep_ct,
+        )
+        plp["mfold_dg"] = m_dg if m_dg is not None else 0.0
+        plp["mfold_db"] = m_db
+        plp["mfold_plot"] = m_plot
+
+    # Export 1: multiplex_panel_probes.csv
+    panel_csv = os.path.join(output_dir, "multiplex_panel_probes.csv")
+    headers = [
+        "Channel",
+        "Status",
+        "Target_Name",
+        "Target_Organism",
+        "Target_Conservation_%",
+        "Target_Avg_Conservation_%",
+        "PLP_ID",
+        "Full_PLP_Sequence",
+        "Total_Length",
+        "Full_PLP_GC%",
+        "Full_PLP_Tm",
+        "Left_Arm",
+        "Backbone",
+        "Right_Arm",
+        "Backbone_Length",
+        "Spacer1_Seq",
+        "RCA_Primer_Binding_Region",
+        "Spacer2_Seq",
+        "Probe_Binding_Region",
+        "Restriction_Site_Seq",
+        "Rest_Backbone_Seq",
+        "Channel_RCA_Primer_Seq",
+        "Channel_RCA_Primer_5_Mod",
+        "Channel_RCA_Primer_Tm",
+        "Channel_RCA_Primer_GC%",
+        "Universal_Detection_Probe_Seq",
+        "Universal_Detection_Probe_5_Mod",
+        "Universal_Detection_Probe_Tm",
+        "Universal_Detection_Probe_GC%",
+        "Vienna_Full_PLP_Structure",
+        "Vienna_Full_PLP_dG_kcal_mol",
+        "mfold_Full_PLP_Structure",
+        "mfold_Full_PLP_dG_kcal_mol",
+        "Left_Arm_Paired_Bases",
+        "Right_Arm_Paired_Bases",
+        "Total_Paired_Bases",
+        "Vienna_Structure_Plot",
+        "mfold_Structure_Plot",
+    ]
+    with open(panel_csv, "w", newline="") as f_out:
+        writer = csv.writer(f_out)
+        writer.writerow(headers)
+        for plp in panel_plps:
+            status_str = "Fixed / Existing" if plp.get("is_fixed") else "Newly Designed"
+            writer.writerow([
+                plp["channel_idx"],
+                status_str,
+                plp["target_name"],
+                plp.get("organism", ""),
+                plp.get("conservation_pct", "N/A"),
+                plp.get("avg_conservation_pct", "N/A"),
+                plp["plp_id"],
+                plp["full_plp"],
+                len(plp["full_plp"]),
+                plp["full_gc"],
+                plp["full_tm"],
+                plp["left_arm"],
+                plp["bb"],
+                plp["right_arm"],
+                len(plp["bb"]),
+                plp.get("Spacer1_Seq", ""),
+                plp.get("RCA_Primer_Binding_Region", ""),
+                plp.get("Spacer2_Seq", ""),
+                plp.get("Probe_Binding_Region", ""),
+                plp.get("Restriction_Site_Seq", ""),
+                plp.get("Rest_Backbone_Seq", ""),
+                plp["rca_primer_seq"],
+                plp["rca_primer_mod"],
+                plp["rca_primer_tm"],
+                plp["rca_primer_gc"],
+                univ_probe,
+                "5'-FAM",
+                probe_tm,
+                probe_gc,
+                plp["dot_bracket"],
+                plp["mfe_dg"],
+                plp["mfold_db"],
+                plp["mfold_dg"],
+                plp["paired_left"],
+                plp["paired_right"],
+                plp["paired_total"],
+                plp["vienna_plot"],
+                plp["mfold_plot"],
+            ])
+
+    # Export 2: multiplex_cross_reactivity_matrix.csv
+    matrix_csv = os.path.join(output_dir, "multiplex_cross_reactivity_matrix.csv")
+    save_cross_reactivity_matrix_csv(best_panel["matrix_data"], matrix_csv)
+
+    # Export 3: multiplex_oligos_order_sheet.csv
+    order_csv = os.path.join(output_dir, "multiplex_oligos_order_sheet.csv")
+    with open(order_csv, "w", newline="") as f_ord:
+        ord_writer = csv.writer(f_ord)
+        ord_writer.writerow([
+            "Oligo_Name",
+            "Status",
+            "Sequence_5to3",
+            "5_Modification",
+            "Length_nt",
+            "GC%",
+            "Tm_C",
+            "Vienna_Full_PLP_dG_kcal_mol",
+            "mfold_Full_PLP_dG_kcal_mol",
+            "Restriction_Site",
+            "Role",
+            "Target_Channel",
+        ])
+        # Universal Detection Probe (1 shared oligo for whole multiplex reaction)
+        probe_status = "Already In Hand (Fixed)" if (num_fixed > 0 and parsed_fixed.get("universal_detection_probe")) else "To Order"
+        ord_writer.writerow([
+            "Universal_Detection_Probe",
+            probe_status,
+            univ_probe,
+            "5'-FAM",
+            len(univ_probe),
+            probe_gc,
+            probe_tm,
+            "N/A",
+            "N/A",
+            "N/A",
+            "Shared Fluorescent/LFA Detection Probe",
+            "Universal (All Channels)",
+        ])
+        # Channel-specific RCA Primers (1 labeled oligo per channel)
+        for ch_idx, ch in enumerate(channel_groups):
+            ch_num = ch["channel_idx"]
+            r_meta = rca_primers[ch_idx]
+            r_seq = r_meta["seq"]
+            r_status = "Already In Hand (Fixed)" if ch.get("is_fixed") else "To Order"
+            ord_writer.writerow([
+                f"RCA_Primer_{ch_num}_{ch['pathogen']}",
+                r_status,
+                r_seq,
+                r_meta["label"],
+                len(r_seq),
+                r_meta["gc"],
+                r_meta["tm"],
+                "N/A",
+                "N/A",
+                "N/A",
+                f"Channel {ch_num} RCA Amplification Primer",
+                f"{ch['pathogen']} (Channel {ch_num})",
+            ])
+        # Padlock Probes (circularization probes)
+        for plp in panel_plps:
+            ch = plp["channel_idx"]
+            p_seq = plp["full_plp"]
+            p_status = "Already In Hand (Fixed)" if plp.get("is_fixed") else "To Order"
+            re_site_str = plp.get("Restriction_Site_Seq") or "None"
+            ord_writer.writerow([
+                plp["plp_id"],
+                p_status,
+                p_seq,
+                "None (5' Phosphorylated for ligation)",
+                len(p_seq),
+                plp["full_gc"],
+                plp["full_tm"],
+                f"{plp['mfe_dg']:.2f}" if isinstance(plp.get('mfe_dg'), (int, float)) else "N/A",
+                f"{plp['mfold_dg']:.2f}" if isinstance(plp.get('mfold_dg'), (int, float)) else "N/A",
+                re_site_str,
+                f"Padlock Probe ({'Fixed Reference' if plp.get('is_fixed') else 'Circularizing Target Hybridizer'})",
+                f"Channel {ch}",
+            ])
+
+    print("=" * 80)
+    print(f"SUCCESS: Generated fully orthogonal {num_channels}-plex assay panel!")
+    print(f"Panel Probes CSV        -> {panel_csv}")
+    print(f"Cross-Reactivity Matrix -> {matrix_csv}")
+    print(f"Synthesis Order Sheet   -> {order_csv}")
+    print("=" * 80 + "\n")
+
+    # Display Clean Terminal Summary
+    print(f"{'Channel':<8} {'Target':<18} {'PLP ID':<36} {'Vienna dG':<11} {'mfold dG':<11} {'RCA Primer (Tm)':<22} {'RCA Reporter':<14}")
+    print("-" * 122)
+    for plp in panel_plps:
+        rca_info = f"{plp['rca_primer_seq'][:8]}.. ({plp['rca_primer_tm']}°C)"
+        print(
+            f"{plp['channel_idx']:<8} "
+            f"{plp['target_name']:<18} "
+            f"{plp['plp_id']:<36} "
+            f"{plp['mfe_dg']:<11.2f} "
+            f"{plp['mfold_dg']:<11.2f} "
+            f"{rca_info:<22} "
+            f"{plp['rca_primer_mod']:<14}"
+        )
+    print("-" * 122 + "\n")
+
+    return best_panel

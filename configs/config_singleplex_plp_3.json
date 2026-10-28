@@ -1,0 +1,18 @@
+{
+  "plp_generation": {
+    "plp_per_arm": 10,
+    "min_plp_mfe_dg": -3.0,
+    "max_paired_arm_bases": 4,
+    "max_paired_total_bases": 16,
+    "structures_dir": "plp_structures",
+    "keep_ct_ps": false,
+    "backbone_architecture": {
+      "spacer1_len": 4,
+      "spacer2_len": 4,
+      "rest_len": 4
+    }
+  }
+}
+
+
+

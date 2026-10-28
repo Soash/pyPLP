@@ -1,0 +1,15 @@
+{
+  "plp_generation": {
+    "min_plp_mfe_dg": -1.0,
+    "max_paired_arm_bases": 2,
+    "max_paired_total_bases": 4,
+    "backbone_architecture": {
+      "spacer1_len": 4,
+      "rca_primer_binding_len": 18,
+      "spacer2_len": 4,
+      "probe_binding_len": 18,
+      "rest_len": 4
+    }
+  }
+}
+
