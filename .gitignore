@@ -90,6 +90,7 @@ test_run.txt
 scratch/
 .system_generated/
 *.out
+README_DETAILED.md
 
 # ------------------------------------------------------------------------------
 # 8. Jupyter Notebooks & Checkpoints
